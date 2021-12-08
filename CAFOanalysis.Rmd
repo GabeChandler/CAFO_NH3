@@ -3,6 +3,14 @@ title: "CAFO NH3 Analysis"
 output: pdf_document
 ---
 
+Relevant Links: 
+
+-EPA NEI: https://www.epa.gov/air-emissions-inventories/2017-national-emissions-inventory-nei-data 
+-EPA NPDES: https://www.epa.gov/npdes/npdes-cafo-regulations-implementation-status-reports
+-EPA AQS: https://aqs.epa.gov/aqsweb/airdata/download_files.html#Raw
+-IMPROVE Network: http://views.cira.colostate.edu/fed/QueryWizard/Default.aspx
+-USDA Agriculture Census: https://www.nass.usda.gov/AgCensus/index.php
+
 ```{r, include=FALSE}
 animals <- read.csv("ubercool.csv") 
 animals <- animals[,-c(1,2)]
