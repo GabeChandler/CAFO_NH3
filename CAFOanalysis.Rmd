@@ -11,6 +11,436 @@ Relevant Links:
 -IMPROVE Network: http://views.cira.colostate.edu/fed/QueryWizard/Default.aspx
 -USDA Agriculture Census: https://www.nass.usda.gov/AgCensus/index.php
 
+```{r}
+require(ncdf4)
+require(lubridate)
+require(ggplot2)
+```
+
+
+```{r}
+lon.lim <- c(-125.5,-65.5)
+lat.lim <- c(25.5,50.5) 
+months <- c('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec')
+years <- 2003:2015
+```
+
+```{r}
+all.data <- c()
+for (j in 1:length(years)) {
+  for (i in 1:12) {
+    file <- paste("AIRS_NH3_VMR_", months[i], ".", toString(years[j]), ".V3.nc", sep="")  
+    nc_ds <- nc_open(file)
+    var1 <- ncvar_get(nc_ds, "nh3_vmr", collapse_degen=TRUE)
+    dim_depth <- ncvar_get(nc_ds, "press_level")
+    dim_lon <- ncvar_get(nc_ds, "lon")
+    dim_lat <- ncvar_get(nc_ds, "lat")
+    dim_time <- ncvar_get(nc_ds, "time")
+    t_units <- ncatt_get(nc_ds, "time", "units")
+    t_ustr <- strsplit(t_units$value, " ")
+    t_dstr <- strsplit(unlist(t_ustr)[3], "-")
+    date <- ymd(t_dstr) + dseconds(dim_time)
+    coords <- as.matrix(expand.grid(dim_depth,dim_lon, dim_lat,  date))
+    nc_df <- data.frame(cbind(coords, var1))
+    names(nc_df) <- c("pressure","lon", "lat",  "time", "nh3")
+    nc_df <- na.omit(nc_df)
+    for (k in c(1,2,3,5)) 
+      nc_df[,k] <- as.numeric(nc_df[,k])
+    nc_df <- nc_df[nc_df$pressure == 918.1261,]
+    nc_df <- nc_df[nc_df$lon >= lon.lim[1] & nc_df$lon <= lon.lim[2],]
+    nc_df <- nc_df[nc_df$lat >= lat.lim[1] & nc_df$lat <= lat.lim[2],]
+    all.data <- rbind(all.data, nc_df)
+  }
+}
+
+```
+
+
+```{r}
+states <- map_data("state")
+states$subregion[is.na(states$subregion)] <- "none"
+statelist <- unique(states$region)
+plot(states[,1:2], t='n')
+for (i in 1:length(statelist)) { 
+  data.sub <- states[states$region == statelist[i],]
+  regs <- unique(data.sub$subregion)
+  for (j in 1:length(regs)) {
+    lines(data.sub[data.sub$subregion==regs[j],1:2])
+  }
+}
+points(nc_df$lon, nc_df$lat, cex=nc_df$nh3/max(nc_df$nh3))
+```
+```{r}
+
+all.locs <- unique(all.data[,2:3])
+baseline <- rep(NA, nrow(all.locs))
+slopes <- rep(NA, nrow(all.locs))
+for (i in 1:nrow(all.locs)) {
+  loc <- unlist(as.vector(all.locs[i,]))
+  loc.data <- all.data[((all.data[,2]==loc[1]) & (all.data[,3]==loc[2])),]
+  if (nrow(loc.data) > 4) {
+  months <- month(loc.data[,4])
+  years <- year(loc.data[,4])-2003
+  time <- months + 12*years
+  fit <- lm(loc.data[,5]~time)$coef
+  baseline[i] <- fit[1]
+  slopes[i] <- fit[2]
+  }
+}
+```
+
+```{r}
+states <- map_data("state")
+states$subregion[is.na(states$subregion)] <- "none"
+statelist <- unique(states$region)
+plot(states[,1:2], t='n')
+for (i in 1:length(statelist)) { 
+  data.sub <- states[states$region == statelist[i],]
+  regs <- unique(data.sub$subregion)
+  for (j in 1:length(regs)) {
+    lines(data.sub[data.sub$subregion==regs[j],1:2])
+  }
+}
+
+all.slopes <- na.omit(cbind(all.locs, slopes, baseline))
+baseline1 <- all.slopes[,4]
+baseline1 <- baseline1 / max(baseline1)
+slopes1 <- all.slopes[,3]
+slopes.cex <- abs(slopes1)
+slopes.cex <- slopes.cex/max(slopes.cex)
+points(all.slopes[,1], all.slopes[,2], cex=slopes.cex*3, col=2+(slopes1>0), pch=19)
+```
+
+```{r}
+la <- 844
+loc <- unlist(all.slopes[844,1:2])
+loc.data <- all.data[((all.data[,2]==loc[1]) & (all.data[,3]==loc[2])),]
+months <- month(loc.data[,4])
+years <- year(loc.data[,4])-2003
+time <- months + 12*years
+fit <- lm(loc.data[,5]~time)$coef
+```
+
+
+```{r}
+all.iasi <- c()
+for (i in 6:8) {
+  for (j in 1:(31-(i==6))) {
+    if (i==6 & j==7)
+      next
+    m <- toString(j)
+    if (nchar(m)==1) 
+      m <- paste(0,m, sep="")
+    file <- paste('IASI_METOPB_L2_NH3_20170', i, m,'_ULB-LATMOS_V3.1.0.nc', sep="")
+    nc_ds <- nc_open(file)
+    dim_lon <- ncvar_get(nc_ds, "longitude")
+    dim_lat <- ncvar_get(nc_ds, "latitude")
+    dim_time <- ncvar_get(nc_ds, "time_in_day")
+    var1 <- ncvar_get(nc_ds, "nh3_total_column")
+    nc_df <- data.frame(lon=dim_lon, lat=dim_lat, time=dim_time, nh3=var1)
+    nc_df <- nc_df[nc_df$lon >= lon.lim[1] & nc_df$lon <= lon.lim[2],]
+    nc_df <- nc_df[nc_df$lat >= lat.lim[1] & nc_df$lat <= lat.lim[2],]
+    nc_df <- na.omit(nc_df)
+    nc_df$date <- paste(i,'/',m, sep="")
+    all.iasi <- rbind(all.iasi, nc_df)
+  }
+}
+```
+
+```{r}
+states <- map_data("state")
+states$subregion[is.na(states$subregion)] <- "none"
+statelist <- unique(states$region)
+plot(states[,1:2], t='n')
+for (i in 1:length(statelist)) { 
+  data.sub <- states[states$region == statelist[i],]
+  regs <- unique(data.sub$subregion)
+  for (j in 1:length(regs)) {
+    lines(data.sub[data.sub$subregion==regs[j],1:2])
+  }
+}
+points(nc_df$lon, nc_df$lat, cex=nc_df$nh3/max(nc_df$nh3))
+```
+
+```{r}
+lons <- seq(lon.lim[1], lon.lim[2], .25)
+lats <- seq(lat.lim[1]-.5, lat.lim[2], .25)
+```
+
+```{r IASI data smoother}
+m.iasi <- matrix(0, nrow=length(lons), ncol=length(lats))
+for (i in 1:length(lons)) {
+  for (j in 1:length(lats)) {
+    weights <- dnorm(all.iasi$lon, lons[i], .3) * dnorm(all.iasi$lat, lats[j], .3)
+    m.iasi[i,j] <- sum(weights * all.iasi$nh3) / sum(weights)
+  }
+}
+
+#write.table(m.iasi, "iasi_smooth")
+
+```
+
+```{r AIRS data average}
+m2 <- matrix(0, nrow=length(lons), ncol=length(lats))
+for (i in 1:length(lons)) {
+  for (j in 1:length(lats)) {
+    weights <- dnorm(all.data$lon, lons[i], .6) * dnorm(all.data$lat, lats[j], .6)
+    m2[i,j] <- sum(weights * all.data$nh3) / sum(weights)
+  }
+}
+```
+
+```{r}
+summary(lm(as.vector(m)~as.vector(m2)))
+
+
+```
+
+```{r}
+image(lons, lats, m.iasi)
+states <- map_data("state")
+states$subregion[is.na(states$subregion)] <- "none"
+statelist <- unique(states$region)
+#plot(states[,1:2], t='n')
+for (i in 1:length(statelist)) { 
+  data.sub <- states[states$region == statelist[i],]
+  regs <- unique(data.sub$subregion)
+  for (j in 1:length(regs)) {
+    lines(data.sub[data.sub$subregion==regs[j],1:2])
+  }
+}
+points(blob, pch=19, cex=.3)
+```
+
+
+```{r}
+m.slope <- matrix(0, nrow=length(lons), ncol=length(lats))
+for (i in 1:length(lons)) {
+  for (j in 1:length(lats)) {
+    if (min(sqrt((lons[i] - all.slopes$lon)^2 + (lats[j] - all.slopes$lat)^2))<1) { 
+      weights <- dnorm(all.slopes$lon, lons[i], .6) * dnorm(all.slopes$lat, lats[j], .6)
+      m.slope[i,j] <- sum(weights * all.slopes$slopes) / sum(weights)
+    }
+  }
+}
+```
+
+
+```{r}
+#m.slope2 <- m.slope
+#m.slope2[which(-m.slope>max(m.slope))] <- -max(m.slope) 
+par(bg="gray")
+image(lons, lats, m.slope2, col=alyssa.col)
+states <- map_data("state")
+states$subregion[is.na(states$subregion)] <- "none"
+statelist <- unique(states$region)
+#plot(states[,1:2], t='n')
+for (i in 1:length(statelist)) { 
+  data.sub <- states[states$region == statelist[i],]
+  regs <- unique(data.sub$subregion)
+  for (j in 1:length(regs)) {
+    lines(data.sub[data.sub$subregion==regs[j],1:2])
+  }
+}
+```
+
+```{r}
+color.bar <- function(lut, min, max=-min, nticks=11, ticks=seq(min, max, len=nticks), title='') {
+    scale = (length(lut)-1)/(max-min)
+
+    dev.new(width=1.75, height=5)
+    plot(c(0,10), c(min,max), type='n', bty='n', xaxt='n', xlab='', yaxt='n', ylab='', main=title)
+    axis(2, ticks, las=1)
+    for (i in 1:(length(lut)-1)) {
+     y = (i-1)/scale + min
+     rect(0,y,10,y+1/scale, col=lut[i], border=NA)
+    }
+}
+color.bar(colorRampPalette(c("darkgreen", "white", "darkred"))(100), -1)
+color.bar(hcl.colors(100, "YlOrRd", rev = TRUE), round(min(m.slope)*10^4,1), round(max(m)*10^11,1))
+
+color.bar(colorRampPalette(c("#2171b5", "white", "red3"))(100), -1)
+
+alyssa.col <- colorRampPalette(c("#2171b5", "white", "red3"))(100)
+```
+
+```{r}
+in.state <- function(long, lat) {
+  states <- map_data("state")
+  states$subregion[is.na(states$subregion)] <- "none"
+  statelist <- unique(states$region)
+  stated <- "none"
+  while (stated=="none") {
+    for (i in 1:length(statelist)) { 
+      data.sub <- states[states$region == statelist[i],]
+      regs <- unique(data.sub$subregion)
+      for (j in 1:length(regs)) {
+        if (max(data.sub$long[data.sub$subregion==regs[j]])>=long & 
+            min(data.sub$long[data.sub$subregion==regs[j]])<=long &
+            max(data.sub$lat[data.sub$subregion==regs[j]])>=lat & 
+            min(data.sub$lat[data.sub$subregion==regs[j]])<=lat)
+          stated <- statelist[i]
+      }
+    }
+  }
+  return(stated)
+}
+
+
+North <- 49.382808
+South <-  24.521208
+East <- -66.945392
+West <-  -124.736342
+grid1 <- seq(South, North, length.out=50)
+grid2 <- seq(West, East, length.out=50)
+good.grid <- c()
+for (i in 1:100) {
+  for (j in 1:100) {
+    state <- in.state(grid1[i], grid2[j])
+    if (state!="none")
+      good.grid <- rbind(good.grid, c(grid1[i], grid2[j]))
+  }
+}
+
+```
+
+For computing correlation between animal density and nh3.
+```{r}
+nhthree <- c()
+#animal_density <- read.csv("~/Downloads/animal_density.csv")
+for (i in 1:nrow(animal_density)) {
+  a <- which(lons==animal_density$lon[i])
+  b <- which(lats==animal_density$lat[i])
+  nhthree[i] <- m.iasi[a,b]
+}
+```
+
+```{r levelset}
+loc.temp <- cbind(animals$lat, animals$lon)
+loc.temp <- cbind(loc.temp, animals$ad)
+loc.temp <- as.data.frame(loc.temp)
+#points(loc.temp[,2:1], cex=loc.temp[,3]/150)
+names(loc.temp) <- c("lat", "lon", "ad")
+an.lev <- loc.temp[loc.temp$lon < -85 & loc.temp$lon > -110 & loc.temp$lat > 30.5,]
+lon.mw <- seq(min(an.lev$lon), max(an.lev$lon),.25) 
+lat.mw <- seq(min(an.lev$lat), max(an.lev$lat),.25) 
+grid.mw <- matrix(0, ncol=2, nrow=length(lon.mw)*length(lat.mw))
+k <- 1
+for (i in 1:length(lon.mw)) { 
+  for (j in 1:length(lat.mw)) {
+    grid.mw[k,] <- c(lon.mw[i], lat.mw[j])
+    k <- k + 1
+  }
+}
+plot(grid.mw, cex=.1)
+points(an.lev[,2:1], cex=an.lev[,3]/100, col='red')
+n.data <- nrow(an.lev)
+n.grid <- nrow(grid.mw)
+all.data <- rbind(as.matrix(an.lev[,2:1]), grid.mw) 
+ds <- as.matrix(dist(all.data))
+dist.mw <- ds[1:n.data, (n.data+1):(n.data+n.grid)]
+weights <- dnorm(dist.mw, .5)
+smooth.mw <- c()
+for (i in 1:n.grid) {
+  smooth.mw[i] <- sum(weights[,i] * an.lev[,3]) / sum(weights[,i])
+}
+image(lon.mw, lat.mw, matrix(smooth.mw * (smooth.mw > quantile(smooth.mw, .82)), nrow=length(lon.mw), byrow=TRUE))
+
+image(lon.mw, lat.mw, matrix(smooth.mw * (smooth.mw > quantile(smooth.mw, .82)), nrow=length(lon.mw), byrow=TRUE))
+
+plot(grid.mw[smooth.mw > quantile(smooth.mw, .82)])
+
+mw.mat <- matrix(1*(smooth.mw > quantile(smooth.mw, .82)), nrow=length(lon.mw), byrow=TRUE)
+edge <- c()
+#for (i in 2:99) {
+#  for (j in 2:73) {
+#    if (mw.mat[i,j]==1 & var(as.vector(mw.mat[(i-1:i+1),(j-1):(j+1)]))>0)
+#      edge <-c(edge, j*74 + i)
+#  }
+#}
+edge <- c()
+mw.vec <- 1*(smooth.mw > quantile(smooth.mw, .9))
+for (i in 101:length(smooth.mw)) {
+  if ((mw.vec[i] - mw.vec[i-1])!=0 | (mw.vec[i] - mw.vec[i-74])!=0)
+    edge <- c(edge, i)
+}
+plot(grid.mw[edge,], cex=.3, pch=14, col="pink")
+
+edge <- c()
+mw.vec <- 1*(smooth.mw > 26)#quantile(smooth.mw, .80))
+for (i in 101:length(smooth.mw)) {
+  if ((mw.vec[i] - mw.vec[i-1])!=0 | (mw.vec[i] - mw.vec[i-74])!=0)
+    edge <- c(edge, i)
+}
+points(grid.mw[edge,], cex=.3, pch=14, col='green')
+```
+
+
+```{r}
+plot(grid.mw[smooth.mw > quantile(smooth.mw, .80),], col=alyssa.col[1])
+for (i in 2:100)
+  points(grid.mw[smooth.mw > quantile(smooth.mw, .80+i/500),], col=alyssa.col[i], cex=1-i/200)
+
+```
+
+
+```{r}
+blobby <- read.csv("~/Downloads/blob.csv", header=FALSE)
+animals <- read.csv("~/Downloads/animal_density.csv")
+
+
+#blobby <- matrix(as.numeric(unlist(strsplit(blob$V2, ','))), ncol=2, byrow=TRUE)
+#lats <- unique(blobby[,2])
+lats1 <- unique(blobby[,2])
+blobpts <- c(0,0)
+for (i in 1:length(lats1)) {
+  these <- range(blobby[which(blobby[,2]==lats1[i]),1])
+  blobpts <- rbind(blobpts, cbind(seq(min(these), max(these), .25), lats1[i]))
+}
+blobpts <- blobpts[-1,]
+good <- c()
+for (i in 1:nrow(blobpts)) {
+  if (blobpts[i,1]*2==round(blobpts[i,1]*2) & blobpts[i,2]*2==round(blobpts[i,2]*2))
+    good <- c(good, i)
+}
+blobpts <- blobpts[good, ]
+
+good.ad <- c()
+for (i in 1:nrow(blobpts)) {
+  good.ad <- c(good.ad, which(animals$lon == blobpts[i,1] & animals$lat == blobpts[i,2]))
+}
+good.ad <- animals$ad[good.ad]
+
+good.iasi <- c()
+for (i in 1:nrow(blobpts)) {
+  good.iasi <- c(good.iasi, m[which(lons==blobpts[i,1]),which(lats==blobpts[i,2])])
+}
+```
+
+
+```{r}
+par(mfrow=c(2,1))
+x <- runif(1000, 0,100)
+y <- x + rnorm(1000, 0 , 20)
+plot(x,y)
+legend(0, 150, round(cor(x,y),3), bty='n')
+
+forty <- which(x>40 & x<50)
+plot(x[forty], y[forty])
+legend(40, 100, round(cor(x[forty],y[forty]),3), bty="n")
+```
+```{r}
+d.aqs <- c()
+for (i in 1:nrow(ubercool)) {
+  d.aqs[i] <- min(sqrt((aqs.locs[,1]-ubercool$lon[i])^2 + (aqs.locs[,2]-as.numeric(ubercool$lat[i]))^2))
+}
+hist(d.aqs)
+rug(d.aqs[which(ubercool$ALL2017AU > quantile(ubercool$ALL2017AU, .98, na.rm=TRUE) & ubercool$lon > -115)], col='red', lwd=1.5)
+```
+
+
+Old Analysis
+
 ```{r, include=FALSE}
 animals <- read.csv("ubercool.csv") 
 animals <- animals[,-c(1,2)]
